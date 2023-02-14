@@ -1,0 +1,61 @@
+# To use this image, you need a Redis database with persistence enabled.
+# You can start one with Docker using i.e.:
+#
+# $ docker run -p 6379:6379 -d redis
+#
+# Then start this image, specifying the URL of the redis database:
+#
+# $ docker run -p 3000:3000 -d \
+#     -e ONETIMESECRET_REDIS_URL="redis://172.17.0.1:6379/0" \
+#     onetimesecret
+#
+# It will be accessible on http://localhost:3000.
+#
+# Production deployment
+# ---------------------
+#
+# When deploying to production, you should protect your Redis instance
+# with authentication or Redis networks. You should also enable
+# persistence and save the data somewhere, to make sure it doesn't get
+# lost when the server restarts.
+#
+# You should also change the secret to something else, and specify the
+# domain it will be deployed on.
+# For instance, if OTS will be accessible from https://example.com:
+#
+# $ docker run -p 3000:3000 -d \
+#     -e ONETIMESECRET_REDIS_URL="redis://user:password@host:port/0" \
+#     -e ONETIMESECRET_SSL=true -e ONETIMESECRET_HOST=example.com \
+#     -e ONETIMESECRET_SECRET="<put your own secret here>" \
+#     onetimesecret
+
+FROM ruby:2.6-buster AS build
+
+WORKDIR /usr/src/app
+COPY . .
+
+RUN apt-get install libssl-dev make \
+&& gem install bundler:2.3.26 \
+&& bundle config set --local deployment 'true' \
+&& bundle config set --local frozen 'true' \
+&& bundle config set --local without 'dev' \ 
+&& bundle install 
+
+FROM ruby:2.6-slim-buster 
+COPY --from=build /usr/src/app /app
+WORKDIR /app
+
+RUN gem install bundler:2.3.26 \ 
+&& bundle config set --local deployment 'true' \
+&& bundle config set --local frozen 'true' \
+&& bundle config set --local without 'dev' 
+
+EXPOSE 3000
+ENV RACK_ENV prod
+ENV ONETIMESECRET_SSL=true \
+    ONETIMESECRET_HOST=0.0.0.0:3000 \
+    ONETIMESECRET_SECRET=CHANGEME \
+    ONETIMESECRET_REDIS_URL=redis://user:password@host:port/0 \
+    ONETIMESECRET_COLONEL=
+
+CMD ["bundle", "exec", "thin", "start", "--rackup", "config.ru", "--ssl", "--ssl-key-file", "private.key", "--ssl-cert-file", "private.pem"]
